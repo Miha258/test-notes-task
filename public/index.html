@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Notes CRUD (in-memory)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+        h1 { margin-bottom: 8px; }
+        form, .note, .row { margin: 12px 0; }
+        input, textarea { width: 100%; padding: 8px; margin: 6px 0; }
+        button { padding: 8px 12px; cursor: pointer; }
+        .note { border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
+        .meta { color: #666; font-size: 12px; }
+        .row { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+<h1>Notes</h1>
+
+<section id="create">
+    <h3>Create a note</h3>
+    <form id="createForm">
+        <input id="title" placeholder="Title" required />
+        <textarea id="content" rows="3" placeholder="Content"></textarea>
+        <button type="submit">Add</button>
+    </form>
+</section>
+
+<hr />
+
+<section>
+    <div class="row">
+        <button id="reloadBtn">Reload</button>
+        <button id="seedBtn">Seed 2 demo notes</button>
+        <button id="clearBtn">Clear all</button>
+    </div>
+    <div id="list"></div>
+</section>
+
+<script>
+    const $list = document.getElementById("list");
+    const $createForm = document.getElementById("createForm");
+    const $title = document.getElementById("title");
+    const $content = document.getElementById("content");
+    const $reload = document.getElementById("reloadBtn");
+    const $seed = document.getElementById("seedBtn");
+    const $clear = document.getElementById("clearBtn");
+
+    async function api(path, options) {
+        const res = await fetch(path, {
+            headers: { "Content-Type": "application/json" },
+            ...options,
+        });
+        if (!res.ok) {
+            let err;
+            try { err = await res.json(); } catch { err = { error: res.statusText }; }
+            throw new Error(err.error || "Request failed");
+        }
+        if (res.status === 204) return null;
+        return res.json();
+    }
+
+    async function load() {
+        const notes = await api("/notes");
+        render(notes);
+        console.log("Loaded", notes);
+    }
+
+    function render(notes) {
+        $list.innerHTML = "";
+        if (!notes.length) {
+            $list.innerHTML = "<p>No notes yet.</p>";
+            return;
+        }
+        for (const n of notes) {
+            const el = document.createElement("div");
+            el.className = "note";
+            el.innerHTML = `
+          <strong>#${n.id} — ${escapeHtml(n.title)}</strong>
+          <div class="meta">created: ${n.createdAt} | updated: ${n.updatedAt}</div>
+          <p>${escapeHtml(n.content || "")}</p>
+          <details>
+            <summary>Edit</summary>
+            <div>
+              <input data-edit-title="${n.id}" value="${escapeAttr(n.title)}" />
+              <textarea rows="3" data-edit-content="${n.id}">${escapeHtml(n.content || "")}</textarea>
+              <div class="row">
+                <button data-save="${n.id}">Save</button>
+                <button data-delete="${n.id}" style="background:#fee">Delete</button>
+              </div>
+            </div>
+          </details>
+        `;
+            $list.appendChild(el);
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;");
+    }
+    function escapeAttr(s) {
+        return String(s)
+            .replaceAll("&", "&amp;")
+            .replaceAll('"', "&quot;");
+    }
+
+    $createForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+            const note = await api("/notes", {
+                method: "POST",
+                body: JSON.stringify({ title: $title.value, content: $content.value }),
+            });
+            console.log("Created", note);
+            $title.value = "";
+            $content.value = "";
+            await load();
+        } catch (e) {
+            alert(e.message);
+        }
+    });
+
+    $list.addEventListener("click", async (e) => {
+        const saveId = e.target.getAttribute("data-save");
+        const delId = e.target.getAttribute("data-delete");
+        if (saveId) {
+            const titleEl = document.querySelector(`[data-edit-title="${saveId}"]`);
+            const contentEl = document.querySelector(`[data-edit-content="${saveId}"]`);
+            try {
+                const updated = await api(`/notes/${saveId}`, {
+                    method: "PUT",
+                    body: JSON.stringify({ title: titleEl.value, content: contentEl.value }),
+                });
+                console.log("Updated", updated);
+                await load();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+        if (delId) {
+            if (!confirm("Delete this note?")) return;
+            try {
+                await api(`/notes/${delId}`, { method: "DELETE" });
+                console.log("Deleted", delId);
+                await load();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+    });
+
+    $reload.addEventListener("click", load);
+
+    $seed.addEventListener("click", async () => {
+        try {
+            await api("/notes", { method: "POST", body: JSON.stringify({ title: "First note", content: "Hello world" }) });
+            await api("/notes", { method: "POST", body: JSON.stringify({ title: "Second note", content: "More text..." }) });
+            await load();
+        } catch (e) {
+            alert(e.message);
+        }
+    });
+
+    $clear.addEventListener("click", async () => {
+        if (!confirm("Clear ALL notes?")) return;
+        try {
+            await api("/notes", { method: "DELETE" });
+            console.log("Cleared all notes");
+            await load();
+        } catch (e) {
+            alert(e.message);
+        }
+    });
+
+    load();
+</script>
+</body>
+</html>
